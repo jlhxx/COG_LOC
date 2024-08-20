@@ -1,0 +1,112 @@
+#Follows DADA2 1.8 tutorial: https://benjjneb.github.io/dada2/tutorial_1_8.html
+
+setwd("dir../fastq data")
+
+library(dada2); packageVersion("dada2")
+
+path <- "dir../fastq data"
+list.files(path)
+
+# Forward and reverse fastq files
+fnFs <- sort(list.files(path, pattern="_r1.fq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_r2.fq.gz", full.names = TRUE))
+
+# Extract sample names
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+
+#Aggregated read quality profiles
+#forward
+plotQualityProfile(fnFs, aggregate = TRUE)
+#reverse
+plotQualityProfile(fnRs, aggregate = TRUE)
+
+#filter and trim
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(295,270),
+                     maxN=0, maxEE=c(2,6), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=FALSE)
+head(out)
+
+
+errF <- learnErrors(filtFs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errR, nominalQ=TRUE)
+
+#dereplication
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+#sample inference
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
+dadaFs[[1]]
+dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
+
+#merge
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+head(mergers[[1]])
+
+#construct seq table
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab)))
+
+#remove chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+
+#track reads
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+#assign taxonomy - shows multiple database options
+#silva
+taxa <- assignTaxonomy(seqtab.nochim, "silva_nr99_v138.1_wSpecies_train_set.fa.gz", multithread=TRUE)
+
+#oral microbiome HOMD
+#taxa2 <- assignTaxonomy(seqtab.nochim, "eHOMD_RefSeq_dada2_V15.22.fasta.gz", multithread=TRUE)
+#taxa2 <- addSpecies(taxa2, "eHOMD_RefSeq_dada2_assign_species_V15.22.fasta.gz")
+
+#Greengenes
+#taxa <- assignTaxonomy(seqtab.nochim, "gg_13_8_train_set_97.fa.gz", multithread=TRUE)
+
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+#rdp
+taxa_rdp <- assignTaxonomy(seqtab.nochim, "rdp_train_set_18.fa.gz", multithread=TRUE)
+taxa_rdp <- addSpecies(taxa_rdp, "rdp_species_assignment_18.fa.gz")
+
+#phyloseq
+#Import to phyloseq object
+library(phyloseq); packageVersion("phyloseq")
+library(Biostrings); packageVersion("Biostrings")
+library(ggplot2); packageVersion("ggplot2")
+library(readxl)
+theme_set(theme_bw())
+
+#import sample clin data
+metadata <- read_excel("dir.../sample_metadata.xlsx", sheet = "metadata")
+
+sample_df<- as.data.frame(metadata)
+rownames(sample_df)<- sample_df[,1]
+sample_df<-sample_df[,-1]
+
+#phyloseq obj
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               sample_data(sample_df), 
+               tax_table(taxa))
