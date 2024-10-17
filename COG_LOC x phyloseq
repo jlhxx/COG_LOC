@@ -1,0 +1,213 @@
+# Analysis of COG-Loc data using Phyloseq 
+
+setwd("dir...")
+
+library("ggplot2")      # graphics
+library("readxl")       # import from Excel
+library("dplyr")        # filter and reformat data frames
+library("tibble")       # converting column to row names
+library("microbiome") # data analysis and visualisation
+library("phyloseq") # data analysis and visualisation
+library("microbiomeutilities") # utility tools 
+library("RColorBrewer") # color options
+library("ggpubr") # figures
+library("DT") # interactive tables in html and markdown
+library("data.table") # alternative to data.frame
+library("dplyr") # data handling  
+library("vegan") # diversity
+
+#IMPORT DATA TO PHYLOSEQ
+otu_mat <- read_excel("romain_data_171024.xlsx", sheet = "otu")
+tax_mat <- read_excel("romain_data_171024.xlsx", sheet = "tax")
+samples_df <- read_excel("romain_data_171024.xlsx", sheet = "sample")
+
+otu_mat<-as.data.frame(otu_mat)
+rownames(otu_mat)<-otu_mat[,1]
+otu_mat<-otu_mat[,-1]
+a <- rownames(otu_mat)
+otu_mat <- as.data.frame(lapply(otu_mat, as.numeric))
+rownames(otu_mat) <- a # Reassign rownames
+
+#Phyloseq objects need to have row.names
+#define the row names from the otu column
+#otu_mat <- otu_mat %>%
+#  tibble::column_to_rownames("otu") 
+
+tax_mat <- tax_mat %>% 
+  tibble::column_to_rownames("otu")
+
+samples_df <- samples_df %>% 
+  tibble::column_to_rownames("sample") 
+
+otu_mat <- as.matrix(otu_mat)
+tax_mat <- as.matrix(tax_mat)
+
+
+OTU = otu_table(otu_mat, taxa_are_rows = TRUE)
+TAX = tax_table(tax_mat)
+samples = sample_data(samples_df)
+
+Saliva <- phyloseq(OTU, TAX, samples)
+
+tax_table_saliva<-tax_table(Saliva)
+species_names <- tax_table_saliva[, "Species"]
+
+taxa_to_remove <- taxa_names(Saliva)[species_names %in% grep("_NA", species_names, value = TRUE)]
+
+saliva_filtered <- prune_taxa(!taxa_names(Saliva) %in% taxa_to_remove, Saliva)
+
+cat("Number of taxa before filtering:", ntaxa(Saliva), "\n")
+cat("Number of taxa after filtering:", ntaxa(saliva_filtered), "\n")
+
+sample_count <- nsamples(saliva_filtered)
+
+min_samples <- ceiling(0.05 * sample_count)
+
+prevalence_filter <- function(otu) {
+  return(sum(otu > 0) >= min_samples)
+}
+
+saliva_filtered_prevalence <- prune_taxa(apply(otu_table(saliva_filtered), 1, prevalence_filter), saliva_filtered)
+
+saliva_rel_abundance <- transform_sample_counts(saliva_filtered_prevalence, function(x) x / sum(x))
+
+abundance_filter <- function(otu) {
+  return(any(otu >= 0.01))
+}
+
+saliva_filtered_abundance <- prune_taxa(apply(otu_table(saliva_rel_abundance), 1, abundance_filter), saliva_filtered_prevalence)
+
+saliva_filtered_abundance
+
+#Saliva.prune = prune_taxa(taxa_sums(Saliva) > 1, Saliva)
+Saliva.prune<-saliva_filtered_abundance
+#Let’s check whether our data are pruned or not.
+Saliva
+Saliva.prune
+ps0.rar <- Saliva.prune
+
+readcount = data.table(as(sample_data(Saliva.prune), "data.frame"),
+                       TotalReads = sample_sums(Saliva.prune), 
+                       keep.rownames = TRUE)
+setnames(readcount, "rn", "SampleID")
+ggplot(readcount, aes(TotalReads)) + geom_histogram() + ggtitle("Sequencing Depth")
+
+head(readcount[order(readcount$TotalReads), c("SampleID", "TotalReads")])
+
+otu.rare = otu_table(Saliva.prune)
+otu.rare = as.data.frame(t(otu.rare))
+sample_names = rownames(otu.rare)
+
+otu.rarecurve = rarecurve(otu.rare, step = 10000, label = T)
+
+############################################
+summary(sample_sums(Saliva.prune))
+
+barplot(sample_sums(ps0.rar), las =2)
+barplot(sample_sums(ps0.rar), las =2)
+ps0.rar <- Saliva.prune
+
+p.rar <- plot_taxa_prevalence(ps0.rar, "Phylum")
+
+p.rar
+
+hmp.div <- alpha(ps0.rar, index = "all")
+
+hmp.meta <- meta(ps0.rar)
+
+hmp.meta$sam_name <- rownames(hmp.meta)
+
+hmp.div$sam_name <- rownames(hmp.div)
+
+div.df <- merge(hmp.div,hmp.meta, by = "sam_name")
+
+colnames(div.df)
+#########################################################
+colnames(hmp.div)
+
+div.df2 <- div.df[, c("Group1", "diversity_shannon", "chao1")]
+colnames(div.df2) <- c("Group1", "Shannon", "chao1")
+
+colnames(div.df2)
+
+div_df_melt <- reshape2::melt(div.df2)
+head(div_df_melt)
+
+p <- ggboxplot(div_df_melt, x = "Group1", y = "value",
+               fill = "Group1", 
+               palette = "jco", 
+               legend= "right",
+               facet.by = "variable", 
+               scales = "free")
+
+p <- p + rotate_x_text() 
+
+p <- p + rremove("x.text")
+p
+
+div_df_melt$Group1<-as.factor(div_df_melt$Group1)
+lev <- levels(div_df_melt$Group1) # get the variables
+
+L.pairs <- combn(seq_along(lev), 2, simplify = FALSE, FUN = function(i) lev[i])
+
+pval <- list(
+  cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
+  symbols = c("****", "***", "**", "*", "n.s")
+)
+
+p2 <- p + stat_compare_means(
+  comparisons = L.pairs,
+  paired = TRUE,
+  na.rm = TRUE,
+  label = "p.signif",
+  symnum.args = list(
+    cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
+    symbols = c("****", "***", "**", "*", "n.s")
+  )
+)
+
+print(p2)
+
+#############################################
+
+ps1.com <- saliva_filtered_abundance
+taxa_names(ps1.com) <- paste0("Otu_", rownames(tax_table(ps1.com)))
+taxic <- as.data.frame(ps1.com@tax_table) 
+
+ colourCount = length(unique(taxic$Species))  
+getPalette = colorRampPalette(brewer.pal(12, "Paired")) 
+taxic$OTU <- rownames(taxic) 
+colnames(taxic)
+
+taxmat <- as.matrix(taxic)
+new.tax <- tax_table(taxmat)
+tax_table(ps1.com) <- new.tax
+
+tax_table(ps1.com)[tax_table(ps1.com)[, "Phylum"] == "", "Phylum"] <- "UnSpeciesified Phylum"
+
+guide_italics <- guides(fill = guide_legend(label.theme = element_text(
+  size = 15,
+  face = "italic", colour = "Black", angle = 0
+)))
+
+ps1.com.fam <- microbiomeutilities::aggregate_top_taxa2(ps1.com, "Phylum", top = 10)
+
+plot.composition.COuntAbun <- plot_composition(ps1.com.fam) + theme(legend.position = "bottom") +
+  scale_fill_brewer("Species", palette = "Paired") + theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("Relative abundance") + guide_italics + theme(legend.title = element_text(size = 18))
+
+plot.composition.COuntAbun
+
+ps1.com.fam.rel <- microbiome::transform(ps1.com.fam, "compositional")
+
+plot.composition.relAbun <- plot_composition(ps1.com.fam.rel,
+                                             sample.sort = "group",
+                                             x.label = "env_material") 
+plot.composition.relAbun <- plot.composition.relAbun + theme(legend.position = "bottom") 
+plot.composition.relAbun <- plot.composition.relAbun + scale_fill_brewer("Phylum", palette = "Paired") + theme_bw() 
+plot.composition.relAbun <- plot.composition.relAbun + theme(axis.text.x = element_text(angle = 90)) 
+plot.composition.relAbun <- plot.composition.relAbun + ggtitle("Relative abundance") + guide_italics + theme(legend.title = element_text(size = 18))
+
+print(plot.composition.relAbun)
+
