@@ -1,0 +1,41 @@
+# Output fasta files & .biom from DADA2 in R.
+# In this script, a subset of samples will be taken from the data and transformed into .fasta and matching .biom files.
+
+# Load workspace
+load("C:/dir.../file_name.RData")
+
+#>Loading required package: biomformat
+#>Loading required package: dada2
+#>Loading required package: Rcpp
+#>Loading required package: phyloseq
+
+# Subset by high abundance sequences
+sq <- getSequences(seqtab)
+
+# Sum abundances for each sequences across all samples.
+abundances <- rowSums(seqtab)  
+
+# Identify the 50 sequences with highest abundance 
+top50_indices <- order(abundances, decreasing = TRUE)[1:50]
+top50_sequences <- sq[top50_indices]
+top50_abundances <- abundances[top50_indices]
+
+# Create custom reference IDs
+custom_ids <- paste(">1000", seq_along(top50_sequences), sep = "")
+names(top50_sequences) <- custom_ids
+
+# Write the top 50 sequences to FASTA 
+writeFasta(top50_sequences, file = "top50_seqs_custom_ids.fasta")
+
+# Subset the OTU table for the top 50 sequences
+otu <- t(as(otu_table(ps1), "matrix"))
+otu_top50 <- otu[top50_indices, , drop = FALSE]
+
+# Create .biom file for the subset sequences
+# Use the same IDs for the BIOM file as the .fasta file
+biom_row_ids <- custom_ids  # Assign custom sequence IDs for BIOM rows
+rownames(otu_top50)<-names(top50_sequences)
+otu_biom_top50 <- make_biom(data = otu_top50)
+
+# Write the BIOM file
+write_biom(otu_biom_top50, "top50_otu_biom_custom_ids.biom")
