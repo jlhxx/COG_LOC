@@ -1,0 +1,20 @@
+# Perform LEfSe analysis
+#Segata N, Izard J, Waldron L, Gevers D, Miropolsky L, Garrett WS, Huttenhower C. Metagenomic biomarker discovery and explanation. Genome Biol. 2011 Jun 24;12(6):R60. doi: 10.1186/gb-2011-12-6-r60. PMID: 21702898; PMCID: PMC3218848.
+
+#set wd
+
+conda create --name bio_lefse
+source activate bio_lefse
+conda install bioconda::lefse
+
+# With class and subclass
+lefse_format_input.py lefse_input_290824.txt formatted_input.in -c 1 -s 2 -o 1000000
+
+# Class, no subclass, subject (line2), normalization
+lefse_format_input.py romain_lefse_species_input.txt formatted_input.in -c 1 -s -1 -u 2 -o 1000000
+lefse_format_input.py genus.txt formatted_input.in -c 1 -s -1 -u 2 -o 1000000
+
+# Run
+lefse_run.py formatted_input.in lefse_matrix.res
+lefse_plot_res.py lefse_matrix.res lefse_matrix.res.svg --format svg
+lefse_plot_cladogram.py lefse_matrix.res lefse_cladogram.svg --format svg
