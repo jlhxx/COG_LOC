@@ -4,10 +4,12 @@
 # Load workspace
 load("C:/dir.../file_name.RData")
 
-#>Loading required package: biomformat
-#>Loading required package: dada2
-#>Loading required package: Rcpp
-#>Loading required package: phyloseq
+# Packages
+library(biomformat) #ver 1.34.0
+library(dada2) #ver 1.34.0
+library(Rcpp) #ver 1.0.13
+library(phyloseq) #ver 1.50.0
+library(ShortRead) #ver 1.64.0
 
 # Subset by high abundance sequences
 sq <- getSequences(seqtab)
@@ -25,7 +27,6 @@ custom_ids <- paste(">1000", seq_along(top50_sequences), sep = "")
 names(top50_sequences) <- custom_ids
 
 # Write the top 50 sequences to FASTA 
-library(ShortRead) #ver 1.64.0
 writeFasta(top50_sequences, file = "top50_seqs_custom_ids.fasta")
 
 # Subset the OTU table for the top 50 sequences
