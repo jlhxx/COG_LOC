@@ -25,6 +25,7 @@ custom_ids <- paste(">1000", seq_along(top50_sequences), sep = "")
 names(top50_sequences) <- custom_ids
 
 # Write the top 50 sequences to FASTA 
+library(ShortRead) #ver 1.64.0
 writeFasta(top50_sequences, file = "top50_seqs_custom_ids.fasta")
 
 # Subset the OTU table for the top 50 sequences
